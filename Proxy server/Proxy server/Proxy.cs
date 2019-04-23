@@ -14,9 +14,9 @@ namespace Proxy_server
     class Proxy
     {
         private int Port;
-        private Thread listenThread = null;
+        // private Thread listenThread = null;
         public bool stopProxy = false;
-
+        private const int backlog = (int)SocketOptionName.MaxConnections;
         public Proxy(int proxyPort)
         {
             this.Port = proxyPort;
@@ -24,29 +24,39 @@ namespace Proxy_server
 
         public void StartProxy()
         {
-            int backlog = (int)SocketOptionName.MaxConnections;
-            IPEndPoint listenIPEndPoint = new IPEndPoint(IPAddress.Loopback, Port);
-            Socket listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            listenSocket.Bind(listenIPEndPoint);
-            listenSocket.Listen(backlog);
-            while (true)
+            using (Socket listenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
             {
-                if (listenSocket.Poll(0, SelectMode.SelectRead))
+                IPEndPoint listenIPEndPoint = new IPEndPoint(IPAddress.Loopback, Port);
+                listenSocket.Bind(listenIPEndPoint);
+                listenSocket.Listen(backlog);
+                Console.WriteLine("Сервер запущен");
+                while (true)
                 {
-                    Socket requestSocket = listenSocket.Accept();
-                    StartClientReceive(requestSocket);
+                    if (listenSocket.Poll(0, SelectMode.SelectRead))
+                    {
+                        //Socket requestSocket = listenSocket.Accept();
+                        //StartClientReceive(requestSocket);
+                        // StartClientReceive(listenSocket.Accept());
+
+                        Thread listenThread = new Thread(() => { ProcessSocket(listenSocket.Accept()); })
+                        {
+                            IsBackground = true
+                        };
+                        listenThread.Start();
+
+                    }
+                    if (stopProxy) break;
                 }
-                if (stopProxy) break;
             }
         }
 
         private void StartClientReceive(Socket socket)
         {
-            listenThread = new Thread(() => { ProcessSocket(socket); })
-            {
-                IsBackground = true
-            };
-            listenThread.Start();
+            //listenThread = new Thread(() => { ProcessSocket(socket); })
+            //{
+            //    IsBackground = true
+            //};
+            //listenThread.Start();
         }
 
         private void ProcessSocket(Socket requestSocket)
@@ -55,69 +65,67 @@ namespace Proxy_server
             {
                 if (requestSocket.Connected)
                 {
-                    byte[] httpClientRequest = GetTcpMessage(requestSocket);
-                    Regex myReg = new Regex(@"Host: (((?<host>.+?):(?<port>\d+?))|(?<host>.+?))\s+", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-                    Match m = myReg.Match(System.Text.Encoding.ASCII.GetString(httpClientRequest));
-                    string host = m.Groups["host"].Value;
-                    int port = 0;
-                    // если порта нет, то используем 80 по умолчанию
-                    if (!int.TryParse(m.Groups["port"].Value, out port)) { port = 80; }
-
-                    // получаем апишник по хосту
-                    IPHostEntry myIPHostEntry = Dns.GetHostEntry(host);
-
-                    // создаем точку доступа
-                    IPEndPoint myIPEndPoint = new IPEndPoint(myIPHostEntry.AddressList[0], port);
-
-                    // создаем сокет и передаем ему запрос
-                    using (Socket myRerouting = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+                    //byte[] httpClientRequest = GetTcpMessage(requestSocket);
+                    byte[] httpClientRequest;
+                    string temp;
+                    string[] requestFields;
+                    string[] hostFields;
+                    string hostField;
+                    string host;
+                    try
                     {
-                        myRerouting.Connect(myIPEndPoint);
-                        if (myRerouting.Send(httpClientRequest, httpClientRequest.Length, SocketFlags.None) != httpClientRequest.Length)
+                        GetTcpMessage(requestSocket, out httpClientRequest);
+                        temp = Encoding.ASCII.GetString(httpClientRequest);
+                        requestFields = temp.Trim().Split(new char[] { '\r', '\n' });
+                        hostField = requestFields.FirstOrDefault(x => x.Contains("Host"));
+                        hostFields = hostField.Split(' ');
+                        host = hostFields[1];
+
+                        Console.WriteLine("Запрос: URL: " + hostFields[1] +" "+ httpClientRequest.Length);
+                        IPHostEntry myIPHostEntry = Dns.GetHostEntry(hostFields[1]);
+                        IPEndPoint myIPEndPoint = new IPEndPoint(myIPHostEntry.AddressList[0], 80);
+
+
+                        using (Socket myRerouting = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
                         {
-                            Console.WriteLine("При отправке данных удаленному серверу произошла ошибка...");
-                        }
-                        else
-                        {
-                            // получаем ответ
-                            byte[] httpResponse = GetTcpMessage(myRerouting);
-                            // передаем ответ обратно клиенту
-                            if (httpResponse != null && httpResponse.Length > 0)
+                            myRerouting.Connect(myIPEndPoint);
+                            if (myRerouting.Send(httpClientRequest, httpClientRequest.Length, SocketFlags.None) != httpClientRequest.Length)
                             {
+                                Console.WriteLine("Error");
+                            }
+                            else
+                            {
+                                byte[] httpResponse;
+                                GetTcpMessage(myRerouting, out httpResponse);
                                 requestSocket.Send(httpResponse, httpResponse.Length, SocketFlags.None);
                             }
                         }
-                    }
-                    requestSocket.Close();
+
                 }
-            }
-            }
-
-        private byte[] GetTcpMessage(Socket socket)
-        {
-            // byte[] curr = new byte[1024];
-            // byte[] res = { };
-            //// EndPoint serv = new EndPoint(IPAddress.Any);
-            // int recv;
-            // do
-            // {
-            //     recv = socket.Receive(curr);
-            //     res.Concat(curr);
-            // }
-
-            // revc = socket.Receive(res, tota)
-            // while (recv != 0); 
-            // return res;
-
-            byte[] b = new byte[socket.ReceiveBufferSize];
-            int len = 0;
-            using (MemoryStream m = new MemoryStream())
-            {
-                while (socket.Poll(1000000, SelectMode.SelectRead) && (len = socket.Receive(b, socket.ReceiveBufferSize, SocketFlags.None)) > 0)
+                    catch (SocketException ex)
                 {
-                    m.Write(b, 0, len);
+                    Console.WriteLine(ex.Message);
                 }
-                return m.ToArray();
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+                requestSocket.Close();
+                }
+            }
+        }
+
+        private static void GetTcpMessage(Socket socket, out byte[] requestBytes)
+        {
+            byte[] buf = new byte[socket.ReceiveBufferSize];
+            int recv = 0;
+            using (MemoryStream requestMemoryStream = new MemoryStream())
+            {
+                while (socket.Poll(99999, SelectMode.SelectRead) && (recv = socket.Receive(buf, socket.ReceiveBufferSize, SocketFlags.None)) > 0)
+                {
+                    requestMemoryStream.Write(buf, 0, recv);
+                }
+                requestBytes = requestMemoryStream.ToArray();
             }
 
         }
@@ -127,6 +135,6 @@ namespace Proxy_server
             stopProxy = true;
             //закрыть сокеты
             //закрыть потоки
-        }
+        }   
     }
 }
