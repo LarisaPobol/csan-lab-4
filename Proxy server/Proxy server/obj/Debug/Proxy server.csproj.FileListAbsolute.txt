@@ -1,7 +1,0 @@
-C:\Users\Пользователь\Desktop\КСиС\Proxy server\Proxy server\bin\Debug\Proxy server.exe.config
-C:\Users\Пользователь\Desktop\КСиС\Proxy server\Proxy server\bin\Debug\Proxy server.exe
-C:\Users\Пользователь\Desktop\КСиС\Proxy server\Proxy server\bin\Debug\Proxy server.pdb
-C:\Users\Пользователь\Desktop\КСиС\Proxy server\Proxy server\obj\Debug\Proxy server.csproj.CoreCompileInputs.cache
-C:\Users\Пользователь\Desktop\КСиС\Proxy server\Proxy server\obj\Debug\Proxy server.exe
-C:\Users\Пользователь\Desktop\КСиС\Proxy server\Proxy server\obj\Debug\Proxy server.pdb
-C:\Users\Пользователь\Desktop\КСиС\Proxy server\Proxy server\obj\Debug\Proxy server.csprojAssemblyReference.cache
