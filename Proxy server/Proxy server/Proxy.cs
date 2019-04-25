@@ -7,18 +7,22 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Configuration;
 
 
 namespace Proxy_server
 {
-    class Proxy
+    class Proxy : IDisposable
     {
+        public void Dispose()
+        {
+            StopProxy();
+        }
+
         private int Port;
         public bool stopProxy = false;
         private const int backlog = (int)SocketOptionName.MaxConnections;
-
+        private const int sendPort = 80;
         public Proxy(int proxyPort)
         {
             this.Port = proxyPort;
@@ -57,50 +61,59 @@ namespace Proxy_server
             {
                 if (requestSocket.Connected)
                 {
-                    bool isForbidden = false;
-                    byte[] httpByteArray;
-                    string[] httpFields;
-                    string[] hostFields;
-                    string hostField;
-                    string host;
-                    string[] responseCode;
-
-                    GetMessageFromSocket(requestSocket, out httpByteArray);
-                    httpFields = SplitHttpToArray(httpByteArray);
-                    hostField = httpFields.FirstOrDefault(x => x.Contains("Host"));
-                    if (hostField == null) return;
-                    hostFields = hostField.Split(' ');
-                    host = string.Copy(hostFields[1]);
-                    isForbidden = IsBlocked(host);
-                    if (isForbidden)
+                    try
                     {
-                        SendErrorPage(requestSocket);
-                        Console.WriteLine(" {0} заблокирован", host);
-                    }
-                    else
-                    {
-                        Console.WriteLine("Запрос: URL: " + hostField);
-                        IPHostEntry ipHostEntry = Dns.GetHostEntry(host);
-                        IPEndPoint ipEndPoint = new IPEndPoint(ipHostEntry.AddressList[0], 80);
-                        using (Socket replySocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+                        bool isForbidden = false;
+                        byte[] httpByteArray;
+                        string[] httpFields;
+                        string[] hostFields;
+                        string hostField;
+                        string host;
+                        string[] responseCode;
+                        GetMessageFromSocket(requestSocket, out httpByteArray);
+                        httpFields = SplitHttpToArray(httpByteArray);
+                        hostField = httpFields.FirstOrDefault(x => x.Contains("Host"));
+                        if (hostField == null) return;
+                        hostFields = hostField.Split(' ');
+                        host = string.Copy(hostFields[1]);
+                        isForbidden = IsBlocked(host);
+                        if (isForbidden)
                         {
-                            replySocket.Connect(ipEndPoint);
-                            if (replySocket.Send(httpByteArray, httpByteArray.Length, SocketFlags.None) != httpByteArray.Length)
+                            SendErrorPage(requestSocket, host);
+                            Console.WriteLine(" {0} заблокирован", host);
+                            return;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Запрос: " + hostField);
+                            IPHostEntry ipHostEntry = Dns.GetHostEntry(host);
+                            IPEndPoint ipEndPoint = new IPEndPoint(ipHostEntry.AddressList[0], sendPort);
+                            using (Socket replySocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
                             {
-                                Console.WriteLine("Не удалось связаться с сервером");
-                            }
-                            else
-                            {
-                                byte[] httpResponse;
-                                GetMessageFromSocket(replySocket, out httpResponse);
-                                requestSocket.Send(httpResponse, httpResponse.Length, SocketFlags.None);
-                                httpFields = SplitHttpToArray(httpResponse);
-                                responseCode = httpFields[0].Split(' ');
-                                Console.WriteLine("Ответ сервера: код: " + responseCode[1]);
+                                replySocket.Connect(ipEndPoint);
+                                if (replySocket.Send(httpByteArray, httpByteArray.Length, SocketFlags.None) != httpByteArray.Length)
+                                {
+                                    Console.WriteLine("Не удалось связаться с сервером");
+                                }
+                                else
+                                {
+                                    byte[] httpResponse;
+                                    GetMessageFromSocket(replySocket, out httpResponse);
+                                    requestSocket.Send(httpResponse, httpResponse.Length, SocketFlags.None);
+                                    httpFields = SplitHttpToArray(httpResponse);
+                                    responseCode = httpFields[0].Split(' ');
+                                    if (responseCode == null) return;
+                                    Console.WriteLine("Ответ сервера: код: " + responseCode[1]);
+                                }
                             }
                         }
+                        requestSocket.Close();
                     }
-                    requestSocket.Close();                  
+                    catch (Exception ex)
+                    {
+                       // Console.WriteLine(ex.Message);
+                    }
+
                 }
             }
         }
@@ -127,7 +140,7 @@ namespace Proxy_server
             resArray = strHttp.Trim().Split(new char[] { '\r', '\n' });
             return resArray;
         }
-
+        
         private bool IsBlocked(string host)
         {
             var blacklist = ConfigurationManager.AppSettings;
@@ -141,9 +154,10 @@ namespace Proxy_server
             return false;
         }
 
-        private void SendErrorPage(Socket socket)
+        private void SendErrorPage(Socket socket, string host)
         {
-            string htmlBody = "<html><body><h1>Forbidden</h1><br><h2> This website is blocked</h2></body></html>";
+            string htmlBody = "<html><body><h1>Forbidden</h1><br><h2 style = \" color: red\">" + host + " is blocked</h2></body></html>";
+            //File.ReadAllText()
             byte[] errorBodyBytes = Encoding.ASCII.GetBytes(htmlBody);
             socket.Send(errorBodyBytes, errorBodyBytes.Length, SocketFlags.None);
         }

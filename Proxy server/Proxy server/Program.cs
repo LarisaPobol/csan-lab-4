@@ -13,14 +13,9 @@ namespace Proxy_server
 
         static void Main(string[] args)
         {
-            Proxy proxy = new Proxy(port);
-            try
+            using (Proxy proxy = new Proxy(port))
             {
                 proxy.StartProxy();
-            }
-            catch
-            {
-                proxy.StopProxy();
             }
         }
     }
